@@ -65,6 +65,11 @@ static int SWTPM_AppendPrintf(char **buffer, const char *fmt, ...)
 
     va_start(ap, fmt);
     n = vasprintf(&dest, fmt, ap);
+
+    // if(dest == NULL)
+    //     printf("dest is null\n");
+    // else 
+    //     printf("dest is ok \n");
     va_end(ap);
     if (n < 0)
         return n;

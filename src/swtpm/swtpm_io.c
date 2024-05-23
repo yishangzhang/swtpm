@@ -58,6 +58,8 @@
 #include <sys/select.h> /* BSD: select() */
 #include <sys/uio.h>
 
+#include <openssl/aes.h>
+
 #include <libtpms/tpm_error.h>
 #include <libtpms/tpm_error.h>
 #include <libtpms/tpm_types.h>
@@ -71,6 +73,53 @@
 /*
   global variables
 */
+
+struct tpm_header {
+	uint16_t tag;
+	uint32_t length;
+	uint32_t ordinal;
+} __attribute__((packed));
+
+
+#define FIXED_OUTPUT_SIZE 512 // 512 bits
+#define AES_KEY_SIZE 32    // 256 bits
+#define AES_BLOCK_SIZE 16
+
+// 密钥
+static const unsigned char key[AES_KEY_SIZE] = {
+    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+    0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+    0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+    0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f
+};
+
+static bool encryptable = false;
+
+// 加密函数
+void aes_encrypt(unsigned char *plaintext, int length) {
+    AES_KEY enc_key;
+    AES_set_encrypt_key(key, 256, &enc_key);
+    unsigned char *p = (unsigned char *)plaintext;
+    
+    for (int i = 0; i < length; i += 16) {
+        // printf("encrypt \n");
+        AES_encrypt(p, p, &enc_key);
+        p += AES_BLOCK_SIZE;
+    }
+}
+
+// 解密函数
+void aes_decrypt(unsigned char *ciphertext, int length) {
+    AES_KEY dec_key;
+    AES_set_decrypt_key(key, 256, &dec_key);
+    unsigned char *c = ciphertext;
+    for (int i = 0; i < length; i += 16) {
+        AES_decrypt(c, c, &dec_key);
+        c += AES_BLOCK_SIZE;
+    }
+    // printf("decrypt end\n");
+}
+
 
 /* platform dependent */
 
@@ -93,6 +142,7 @@ TPM_RESULT SWTPM_IO_Read(TPM_CONNECTION_FD *connection_fd,   /* read/write file 
 {
     ssize_t             n;
     size_t              offset = 0;
+    struct tpm_header *hdr;
 
     if (connection_fd->fd < 0) {
         TPM_DEBUG("SWTPM_IO_Read: Passed file descriptor is invalid\n");
@@ -114,7 +164,23 @@ TPM_RESULT SWTPM_IO_Read(TPM_CONNECTION_FD *connection_fd,   /* read/write file 
     }
 
     *bufferLength = offset;
-    SWTPM_PrintAll(" SWTPM_IO_Read:", " ", buffer, *bufferLength);
+    // SWTPM_PrintAll(" SWTPM_IO_Read:before decrypt", " ", buffer, *bufferLength);
+
+    if(buffer[0] == 0x80)
+    {
+         encryptable = false;
+         return 0;
+    }
+
+    encryptable = true;
+    aes_decrypt(buffer,*bufferLength);
+    hdr = (struct tpm_header *)buffer;
+    *bufferLength = be32toh(hdr->length); 
+    
+
+
+    SWTPM_PrintAll(" SWTPM_IO_Read:decrypt", " ", buffer, *bufferLength);
+
 
     return 0;
 }
@@ -205,28 +271,53 @@ TPM_RESULT SWTPM_IO_Connect(TPM_CONNECTION_FD *connection_fd,     /* read/write 
 */
 
 TPM_RESULT SWTPM_IO_Write(TPM_CONNECTION_FD *connection_fd,       /* read/write file descriptor */
-                          const struct iovec *iovec,
+                          struct iovec *iovec,
                           int iovcnt)
 {
     ssize_t     nwritten = 0;
-    size_t      totlen = 0;
+    size_t      totlen = 0,send_len;
     int         i;
+    struct tpm2_resp_prefix *respprefix;
+    uint32_t *len_send = (uint32_t *) malloc (sizeof(uint32_t));
 
-    SWTPM_PrintAll(" SWTPM_IO_Write:", " ",
-                   iovec[1].iov_base, iovec[1].iov_len);
-
-    /* test that connection is open to write */
+     /* test that connection is open to write */
     if (connection_fd->fd < 0) {
         logprintf(STDERR_FILENO,
-                  "SWTPM_IO_Write: Error, connection not open, fd %d\n",
-                  connection_fd->fd);
+       "SWTPM_IO_Write: Error, connection not open, fd %d\n",
+        connection_fd->fd);
         return TPM_IOERROR;
     }
+    SWTPM_PrintAll(" SWTPM_IO_Write:before encrypt", " ",
+                    iovec[1].iov_base, iovec[1].iov_len);
+
+
+    if(encryptable){
+
+        send_len = ((iovec[1].iov_len /AES_BLOCK_SIZE )+1)*AES_BLOCK_SIZE ;
+        respprefix = iovec[0].iov_base;
+        *len_send = send_len;
+        iovec[0].iov_base = len_send;
+        iovec[0].iov_len = 4;
+
+        iovec[1].iov_len = send_len;
+        aes_encrypt(iovec[1].iov_base,send_len);
+        // SWTPM_PrintAll(" SWTPM_IO_Write:encrypt", " ",
+        //             iovec[1].iov_base, iovec[1].iov_len);
+    }
+
+       
 
     for (i = 0; i < iovcnt; i++)
         totlen += iovec[i].iov_len;
 
     nwritten = writev_full(connection_fd->fd, iovec, iovcnt);
+    iovec[0].iov_base= respprefix;
+
+  
+
+
+
+   
     if (nwritten < 0) {
         logprintf(STDERR_FILENO, "SWTPM_IO_Write: Error, writev() %d %s\n",
                   errno, strerror(errno));

@@ -1013,7 +1013,7 @@ static int parse_ctrlchannel_options(char *options, struct ctrlchannel **cc,
                 goto error;
             }
 
-            bindaddr = option_get_string(ovs, "bindaddr", "127.0.0.1");
+            bindaddr = option_get_string(ovs, "bindaddr", "0.0.0.0");
             ifname = option_get_string(ovs, "ifname", NULL);
 
             fd = tcp_open_socket(port, bindaddr, ifname);
@@ -1161,7 +1161,7 @@ static int parse_server_options(char *options, struct server **c)
                 goto error;
             }
 
-            bindaddr = option_get_string(ovs, "bindaddr", "127.0.0.1");
+            bindaddr = option_get_string(ovs, "bindaddr", "0.0.0.0");
             ifname = option_get_string(ovs, "ifname", NULL);
 
             fd = tcp_open_socket(port, bindaddr, ifname);

@@ -44,6 +44,9 @@ typedef struct TPM_CONNECTION_FD {
     int fd;     /* for socket, just an int */
 } TPM_CONNECTION_FD;
 
+void aes_encrypt(unsigned char *plaintext, int length);
+void aes_decrypt(unsigned char *ciphertext, int length);
+
 TPM_RESULT SWTPM_IO_Init(void);
 TPM_RESULT SWTPM_IO_Connect(TPM_CONNECTION_FD *connection_fd,
                             int notify_fd);
@@ -52,7 +55,7 @@ TPM_RESULT SWTPM_IO_Read(TPM_CONNECTION_FD *connection_fd,
                          uint32_t *paramSize,
                          size_t buffer_size);
 TPM_RESULT SWTPM_IO_Write(TPM_CONNECTION_FD *connection_fd,
-                          const struct iovec *iovec,
+                          struct iovec *iovec,
                           int iovcnt);
 TPM_RESULT SWTPM_IO_Disconnect(TPM_CONNECTION_FD *connection_fd);
 TPM_RESULT SWTPM_IO_SetSocketFD(int fd);
